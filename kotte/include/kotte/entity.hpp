@@ -2,6 +2,8 @@
 
 #include "kotte/entity_handle.hpp"
 
+
+
 #include <cstdint>
 #include <optional>
 #include <raylib.h>
@@ -27,7 +29,16 @@ namespace kotte
         float fuse_remaining = 0.0f;
         std::uint8_t blast_range = 0;
         bool detonation_requested = false;
+
     };
+
+    struct health final {
+        int current_health = 100;
+        int max_health = 100;
+
+
+
+  };
 
     struct Entity final {
         EntityKind kind = EntityKind::crate;

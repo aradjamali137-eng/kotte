@@ -34,7 +34,7 @@ namespace kotte
         }
     }
 
-    void Application::run_frame(float delta_time){
+    void Application::run_frame(float delta_time) {
         // Full frame order:
         // 1. Reset frame-local state.
         // 2. Translate input into gameplay intent.
@@ -47,15 +47,48 @@ namespace kotte
         //
         // Keeping one call site per phase makes event lifetime and mutation
         // boundaries visible as the simulation grows.
-        begin_frame();
-        collect_frame_actions();
-        update_gameplay(delta_time);
-        update_timed_gameplay(delta_time);
-        resolve_gameplay_facts();
-        apply_structural_mutations();
-        update_presentation(delta_time);
-        render();
+        switch (currentGameState) {
+        case GAMESTATE::StartMenu: 
+            ClearBackground(BLACK);
+            BeginDrawing();
+            DrawText("press enter to start", (window_.width() / 2)-200 , (window_.height() / 2)-100,  60, RED);
+                EndDrawing();
+                if (IsKeyDown(KEY_ENTER))
+                    currentGameState = GAMESTATE::Game;
+            break;
+        case GAMESTATE::Game:
+            begin_frame();
+            collect_frame_actions();
+            update_gameplay(delta_time);
+            update_timed_gameplay(delta_time);
+            resolve_gameplay_facts();
+            apply_structural_mutations();
+            update_presentation(delta_time);
+            render();
+
+         
+            break;
+        case GAMESTATE::GameOVER:
+            ClearBackground(PURPLE);
+                BeginDrawing();
+                DrawText("press Space to start", (window_.width() / 2) - 200, (window_.height() / 2) - 100, 60, RED);
+                DrawText("ur score[]"/*score*/, (window_.width() / 2) - 500, (window_.height() / 2) - 300, 60, RED);
+               
+            EndDrawing();
+            if (IsKeyDown(KEY_SPACE))
+            {
+                player_health.current_health = player_health.max_health;
+                currentGameState = GAMESTATE::Game;
+                
+            }
+            break;
+
+        }
+
+      
+  
     }
+
 
     void Application::begin_frame() noexcept{
         // Every request must be consumed by the previous frame's mutation phase.
@@ -100,6 +133,7 @@ namespace kotte
     }
 
     void Application::update_timed_gameplay(float delta_time){
+        Time -= delta_time;
         // This list is independent of camera queries, so off-screen fuses advance.
         for(const EntityHandle bomb_handle : active_bomb_handles_){
             Entity* bomb = entities_.try_get(bomb_handle);
@@ -353,6 +387,7 @@ namespace kotte
 
             switch(candidate->kind){
             case EntityKind::bomb:
+                break;
             case EntityKind::enemy:
                 destroy_entity_requests_.push_back({handle});
                 break;
@@ -397,7 +432,7 @@ namespace kotte
 
     void Application::render(){
         Frame frame{background_color_};
-
+        
         const Rectangle world_view = camera_.world_view();
         const TileRange visible_tiles = map_.tiles_overlapping(world_view, tile_size_);
         std::size_t tiles_rendered = 0;
@@ -540,6 +575,16 @@ namespace kotte
 
         diagnostics = std::format("seed: {}", seed_);
         DrawText(diagnostics.c_str(), 10, window_.height() - 78, 20, RAYWHITE);
+        
+        diagnostics = std::format("Health: {}", 
+            player_health.current_health);
+        DrawText(diagnostics.c_str(), window_.width()-200, window_.height() - 56, 20, RAYWHITE);
+       
+        diagnostics = std::format("time: {}s",
+           static_cast<int> (Time));
+        DrawText(diagnostics.c_str(), window_.width() - 300, window_.height() -80, 20, RAYWHITE);
+       ;
+
 
         diagnostics = std::format(
             "world: {} x {} tiles | {} total", map_.width(), map_.height(), map_.tile_count());
@@ -675,27 +720,51 @@ namespace kotte
         collision_diagnostics_.candidate_references += spatial_query.candidate_references;
         // These counters aggregate work across movers, not globally unique entities.
         collision_diagnostics_.unique_candidates += spatial_query.entity_handles.size();
-
+      
         bool blocked = false;
 
         // Filter: remove the mover and non-solid kinds before exact testing.
-        for(const EntityHandle candidate_handle : spatial_query.entity_handles){
-            if(candidate_handle == moving_entity_handle){
+        for (const EntityHandle candidate_handle : spatial_query.entity_handles) {
+            if (candidate_handle == moving_entity_handle) {
                 continue;
             }
 
             const Entity* candidate = entities_.try_get(candidate_handle);
-            if(candidate == nullptr || !is_solid(candidate->kind)){
+            if (candidate == nullptr || !is_solid(candidate->kind)) {
                 continue;
+
             }
 
             // Narrow phase: exact-test the remaining solid candidate.
             ++collision_diagnostics_.exact_tests;
-            if(CheckCollisionRecs(proposed_collision_bounds, entity_collision_bounds(*candidate))){
+            if (CheckCollisionRecs(proposed_collision_bounds, entity_collision_bounds(*candidate))) {
                 ++collision_diagnostics_.contacts;
                 blocked = true;
+                // Final Assigment 
+                // If Enemy hits the player || the player hits the enemy , player lose hp + get pushed back
+
+
+                if (proposed_entity.kind == EntityKind::player && candidate->kind == EntityKind::enemy && player_health.current_health > 19) {
+                    player_health.current_health -= 20;
+                    Entity& player = entity(player_handle_);
+                    player.world_position.x -= 30;
+                }
+                 
+                
+                    
+                
+                if (proposed_entity.kind == EntityKind::enemy && candidate->kind == EntityKind::player && player_health.current_health > 19) {
+                    player_health.current_health -= 20;
+                    Entity& player = entity(player_handle_);
+                    const Rectangle player_old_bounds = entity_world_bounds(player);
+                    player.world_position.x -= 30;
+                    spatial_grid_.update(player_handle_, player_old_bounds, entity_world_bounds(player));
+                }
+                if (player_health.current_health < 19) {currentGameState= GAMESTATE::GameOVER; }
             }
+            
         }
+
 
         return blocked;
     }
@@ -703,6 +772,7 @@ namespace kotte
     bool Application::is_solid(EntityKind kind) noexcept{
         switch(kind){
         case EntityKind::player:
+
         case EntityKind::crate:
         case EntityKind::enemy:
             return true;

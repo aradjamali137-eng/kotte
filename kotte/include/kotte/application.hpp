@@ -46,6 +46,15 @@ namespace kotte
         void run();
         void request_exit() noexcept;
 
+        enum GAMESTATE
+        {
+            StartMenu,
+            Game,
+            GameOVER
+           
+
+        };
+
     private:
         struct FrameActions final {
             Vector2 player_movement_direction{};
@@ -72,6 +81,11 @@ namespace kotte
             std::vector<Vector2> tile_centres;
             float remaining_seconds = 0.0f;
         };
+
+        struct decreaseHealthrequest final {
+            EntityHandle entity;
+            int damage_Amount = 10;
+       };
 
         void run_frame(float delta_time);
         void begin_frame() noexcept;
@@ -119,6 +133,12 @@ namespace kotte
         [[nodiscard]] static Vector2 tile_centre(int column, int row) noexcept;
         [[nodiscard]] static Color entity_color(EntityKind kind) noexcept;
         [[nodiscard]] static float entity_roundness(EntityKind kind) noexcept;
+        //int damage = 10;
+        health player_health;
+        GAMESTATE currentGameState = GAMESTATE::StartMenu;
+        float Time = 180.0f;
+
+
         static constexpr int tile_size_ = 40;
         static constexpr int spatial_cell_tiles_ = 8;
         static constexpr float spatial_cell_size_ = tile_size_ * spatial_cell_tiles_;
@@ -151,6 +171,7 @@ namespace kotte
         Renderer renderer_;
         FrameActions frame_actions_;
         std::vector<PlaceBombRequest> place_bomb_requests_;
+        std::vector<decreaseHealthrequest> health_req_;
         std::vector<BombDetonated> bomb_detonated_facts_;
         std::vector<DestroyEntityRequest> destroy_entity_requests_;
         std::vector<BlastEffect> blast_effects_;
