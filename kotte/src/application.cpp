@@ -9,27 +9,27 @@
 #include <utility>
 
 namespace kotte
-{    
+{
     Application::Application(
         int width,
         int height,
         std::string_view title,
         std::uint64_t seed,
         int target_fps)
-        : window_{width, height, title, target_fps}
-        , camera_{window_.size()}
-        , random_{seed}
-        , map_{make_room(200, 120, random_)}
-        , spatial_grid_{{
+        : window_{ width, height, title, target_fps }
+        , camera_{ window_.size() }
+        , random_{ seed }
+        , map_{ make_room(200, 120, random_) }
+        , spatial_grid_{ {
             static_cast<float>(map_.width() * tile_size_),
-            static_cast<float>(map_.height() * tile_size_)}, spatial_cell_size_}
-        , seed_{seed}{
+            static_cast<float>(map_.height() * tile_size_)}, spatial_cell_size_ }
+            , seed_{ seed } {
         populate_entities();
         initialize_enemies();
     }
 
-    void Application::run(){
-        while(!window_.should_close() && !exit_requested_){
+    void Application::run() {
+        while (!window_.should_close() && !exit_requested_) {
             run_frame(GetFrameTime());
         }
     }
@@ -48,13 +48,13 @@ namespace kotte
         // Keeping one call site per phase makes event lifetime and mutation
         // boundaries visible as the simulation grows.
         switch (currentGameState) {
-        case GAMESTATE::StartMenu: 
+        case GAMESTATE::StartMenu:
             ClearBackground(BLACK);
             BeginDrawing();
-            DrawText("press enter to start", (window_.width() / 2)-200 , (window_.height() / 2)-100,  60, RED);
-                EndDrawing();
-                if (IsKeyDown(KEY_ENTER))
-                    currentGameState = GAMESTATE::Game;
+            DrawText("press enter to start", (window_.width() / 2) - 200, (window_.height() / 2) - 100, 60, RED);
+            EndDrawing();
+            if (IsKeyDown(KEY_ENTER))
+                currentGameState = GAMESTATE::Game;
             break;
         case GAMESTATE::Game:
             begin_frame();
@@ -66,28 +66,55 @@ namespace kotte
             update_presentation(delta_time);
             render();
 
-         
+
             break;
+
         case GAMESTATE::GameOVER:
             ClearBackground(PURPLE);
-                BeginDrawing();
-                DrawText("press Space to start", (window_.width() / 2) - 200, (window_.height() / 2) - 100, 60, RED);
-                DrawText("ur score[]"/*score*/, (window_.width() / 2) - 500, (window_.height() / 2) - 300, 60, RED);
-               
+
+            entities_ = EntityStore{};
+            spatial_grid_ = SpatialGrid{
+                {static_cast<float>(map_.width() * tile_size_),
+                 static_cast<float>(map_.height() * tile_size_)},
+                 spatial_cell_size_ };
+            enemy_handles_.clear();
+            active_bomb_handles_.clear();
+            blast_effects_.clear();
+            place_bomb_requests_.clear();
+            bomb_detonated_facts_.clear();
+            destroy_entity_requests_.clear();
+
+
+
+            BeginDrawing();
+            DrawText("press Space to start", (window_.width() / 2) - 200, (window_.height() / 2) - 100, 60, RED);
+            DrawText("ur score[]"/*score*/, (window_.width() / 2) - 500, (window_.height() / 2) - 300, 60, RED);
+
+
+
             EndDrawing();
+
             if (IsKeyDown(KEY_SPACE))
             {
                 player_health.current_health = player_health.max_health;
+
+                random_ = Random{ seed_ };
+                map_ = make_room(200, 120, random_);
+                Time = 180.0f;
+                populate_entities();
+                initialize_enemies();
                 currentGameState = GAMESTATE::Game;
-                
+
             }
             break;
 
         }
+    }
+
 
       
-  
-    }
+ 
+    
 
 
     void Application::begin_frame() noexcept{
@@ -130,6 +157,7 @@ namespace kotte
         update_player(delta_time);
         update_enemies(delta_time);
         queue_bomb_placement();
+       
     }
 
     void Application::update_timed_gameplay(float delta_time){
