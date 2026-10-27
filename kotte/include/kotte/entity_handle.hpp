@@ -11,6 +11,7 @@ namespace kotte
 
         std::uint32_t slot = invalid_slot;
         std::uint32_t generation = 0;
+        
 
         [[nodiscard]] auto operator<=>(const EntityHandle&) const noexcept = default;
     };

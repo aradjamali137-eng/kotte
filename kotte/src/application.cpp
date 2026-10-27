@@ -55,6 +55,7 @@ namespace kotte
             EndDrawing();
             if (IsKeyDown(KEY_ENTER))
                 currentGameState = GAMESTATE::Game;
+           
             break;
         case GAMESTATE::Game:
             begin_frame();
@@ -162,6 +163,7 @@ namespace kotte
 
     void Application::update_timed_gameplay(float delta_time){
         Time -= delta_time;
+ 
         // This list is independent of camera queries, so off-screen fuses advance.
         for(const EntityHandle bomb_handle : active_bomb_handles_){
             Entity* bomb = entities_.try_get(bomb_handle);
@@ -363,17 +365,26 @@ namespace kotte
         destroy_entity_requests_.erase(duplicate_tail.begin(), duplicate_tail.end());
 
         for(const DestroyEntityRequest& request : destroy_entity_requests_){
-            const Entity* doomed = entities_.try_get(request.entity);
+             Entity* doomed = entities_.try_get(request.entity);
             if(doomed == nullptr){
                 continue;
             }
 
             // Spatial membership is derived from the live entity, so remove it
             // while the handle can still resolve to the bounds used at insertion.
-            spatial_grid_.remove(request.entity, entity_world_bounds(*doomed));
-            const bool destroyed = entities_.destroy(request.entity);
-            assert(destroyed);
-            (void) destroyed;
+            if (doomed->kind == EntityKind::bomb || doomed->kind == EntityKind::crate)
+            {
+                spatial_grid_.remove(request.entity, entity_world_bounds(*doomed));
+                (void)entities_.destroy(request.entity);
+                continue;
+            }
+            const Rectangle old_world_bounds = entity_world_bounds(*doomed);
+           
+
+            doomed->kind = EntityKind::power_up;
+            const Rectangle new_world_bounds_power_up = entity_world_bounds(*doomed);
+
+            spatial_grid_.update(request.entity, old_world_bounds, new_world_bounds_power_up);
         }
 
         // These update lists are non-owning views. A single cleanup pass keeps
@@ -406,27 +417,30 @@ namespace kotte
         const SpatialQuery contacts = spatial_grid_.query(tile_bounds);
         bool blocked_by_crate = false;
 
-        for(const EntityHandle handle : contacts.entity_handles){
+        for (const EntityHandle handle : contacts.entity_handles) {
             const Entity* candidate = entities_.try_get(handle);
-            if(candidate == nullptr
-                || !CheckCollisionRecs(tile_bounds, entity_collision_bounds(*candidate))){
+            if (candidate == nullptr
+                || !CheckCollisionRecs(tile_bounds, entity_collision_bounds(*candidate))) {
                 continue;
             }
 
-            switch(candidate->kind){
+            switch (candidate->kind) {
             case EntityKind::bomb:
                 break;
             case EntityKind::enemy:
-                destroy_entity_requests_.push_back({handle});
+                destroy_entity_requests_.push_back({ handle });
                 break;
             case EntityKind::crate:
-                destroy_entity_requests_.push_back({handle});
+                destroy_entity_requests_.push_back({ handle });
                 blocked_by_crate = true;
                 break;
             case EntityKind::player:
                 // Player-hit consequences are outside the Week 6 lifetime seam.
                 break;
+                case EntityKind::power_up:
+                    break;
             }
+        
         }
 
         return blocked_by_crate;
@@ -517,7 +531,11 @@ namespace kotte
                     RenderLayer::effect,
                     tile_world_centre.y,
                     0.3f
+                   
                 });
+               
+
+
             }
         }
 
@@ -691,10 +709,12 @@ namespace kotte
     Rectangle Application::entity_world_bounds(const Entity& entity) const noexcept{
         Vector2 size{};
         switch(entity.kind){
-        case EntityKind::player: size = {24.0f, 32.0f}; break;
-        case EntityKind::bomb: size = {22.0f, 22.0f}; break;
+        case EntityKind::player: size = { 28.0f, 30.0f }; break;
+        case EntityKind::bomb: size = {24.0f, 24.0f}; break;
         case EntityKind::crate: size = {36.0f, 48.0f}; break;
         case EntityKind::enemy: size = {28.0f, 30.0f}; break;
+        case EntityKind::power_up: size = { 21.0f, 21.0f }; break;
+
         }
 
         const Vector2 top_left = entity.world_position - Vector2{size.x / 2.0f, size.y};
@@ -708,9 +728,10 @@ namespace kotte
         Vector2 size{};
         switch(entity.kind){
         case EntityKind::player: size = {20.0f, 16.0f}; break;
-        case EntityKind::bomb: size = {18.0f, 12.0f}; break;
+        case EntityKind::bomb: size = {19.0f, 14.0f}; break;
         case EntityKind::crate: size = {32.0f, 32.0f}; break;
         case EntityKind::enemy: size = {24.0f, 14.0f}; break;
+        case EntityKind::power_up: size = { 18.0f, 12.0f }; break;
         }
 
         const Vector2 top_left = entity.world_position - Vector2{size.x / 2.0f, size.y};

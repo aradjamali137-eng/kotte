@@ -47,7 +47,6 @@ namespace kotte
         void request_exit() noexcept;
         
 
-
         enum GAMESTATE
         {
             StartMenu,
@@ -77,6 +76,7 @@ namespace kotte
 
         struct DestroyEntityRequest final {
             EntityHandle entity;
+            Vector2 world_position{};
         };
 
         struct BlastEffect final {
@@ -118,6 +118,7 @@ namespace kotte
         void render();
         void populate_entities();
         void initialize_enemies();
+
         [[nodiscard]] Entity& entity(EntityHandle handle) noexcept;
         [[nodiscard]] const Entity& entity(EntityHandle handle) const noexcept;
         [[nodiscard]] Entity& player() noexcept;
@@ -135,10 +136,12 @@ namespace kotte
         [[nodiscard]] static Vector2 tile_centre(int column, int row) noexcept;
         [[nodiscard]] static Color entity_color(EntityKind kind) noexcept;
         [[nodiscard]] static float entity_roundness(EntityKind kind) noexcept;
-        //int damage = 10;
+        Vector2 tile_redaction = Vector2{ 20,20 };
+
         health player_health;
         GAMESTATE currentGameState = GAMESTATE::StartMenu;
         float Time = 180.0f;
+        int shrink_margin() const noexcept;
 
 
         static constexpr int tile_size_ = 40;
@@ -161,6 +164,9 @@ namespace kotte
         static constexpr Color crate_color_{0xb0, 0x72, 0x3c, 0xff};
         static constexpr Color enemy_color_{0xd9, 0x4f, 0x70, 0xff};
         static constexpr Color wall_color_{0x78, 0x5f, 0x47, 0xff};
+        static constexpr Color power_up_color{ 0x20, 0x8f, 0x2d, 0x3e };
+
+
 
         Window window_; // Constructed first, destroyed last.
         Camera camera_;
@@ -181,5 +187,6 @@ namespace kotte
         std::uint64_t seed_;
         EntityHandle player_handle_;
         bool exit_requested_ = false;
+   
     };
 }
