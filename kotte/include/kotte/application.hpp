@@ -141,8 +141,7 @@ namespace kotte
         health player_health;
         GAMESTATE currentGameState = GAMESTATE::StartMenu;
         float Time = 180.0f;
-        int shrink_margin() const noexcept;
-
+        bool powerup_active = false;
 
         static constexpr int tile_size_ = 40;
         static constexpr int spatial_cell_tiles_ = 8;
@@ -151,6 +150,8 @@ namespace kotte
         static constexpr float enemy_speed_ = 80.0f;
         static constexpr float bomb_fuse_seconds_ = 2.0f;
         static constexpr std::uint8_t bomb_blast_range_ = 3;
+        static constexpr std::uint8_t bomb_blast_range_powerup = 6;
+
         static constexpr float blast_effect_seconds_ = 0.35f;
         static constexpr Color background_color_{0x11, 0x22, 0x33, 0xff};
         static constexpr Color floor_colors_[3]{

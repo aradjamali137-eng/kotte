@@ -341,9 +341,15 @@ namespace kotte
                 .bomb_state = BombState{
                     .owner = request.owner,
                     .fuse_remaining = bomb_fuse_seconds_,
-                    .blast_range = bomb_blast_range_
+                    .blast_range = powerup_active ? bomb_blast_range_powerup : bomb_blast_range_
+                    
                 }
+
             };
+            if (powerup_active)
+            {
+                powerup_active = false;
+            }
             const EntityHandle bomb_handle = entities_.create(bomb);
 
             // The store owns the bomb; these handles are synchronized, non-owning
@@ -372,7 +378,7 @@ namespace kotte
 
             // Spatial membership is derived from the live entity, so remove it
             // while the handle can still resolve to the bounds used at insertion.
-            if (doomed->kind == EntityKind::bomb || doomed->kind == EntityKind::crate)
+            if (doomed->kind == EntityKind::bomb || doomed->kind == EntityKind::crate|| doomed->kind == EntityKind::power_up)
             {
                 spatial_grid_.remove(request.entity, entity_world_bounds(*doomed));
                 (void)entities_.destroy(request.entity);
@@ -390,8 +396,8 @@ namespace kotte
         // These update lists are non-owning views. A single cleanup pass keeps
         // their iteration dense without teaching each destruction source about
         // every list that happens to reference an entity.
-        std::erase_if(enemy_handles_, [this](EntityHandle handle){
-            return !entities_.contains(handle);
+        std::erase_if(enemy_handles_, [this](EntityHandle handle){ 
+            return entity(handle).kind == EntityKind::power_up;
         });
         std::erase_if(active_bomb_handles_, [this](EntityHandle handle){
             return !entities_.contains(handle);
@@ -798,10 +804,12 @@ namespace kotte
                     Entity& player = entity(player_handle_);
                     player.world_position.x -= 30;
                 }
-                 
-                
-                    
-                
+
+
+
+
+
+
                 if (proposed_entity.kind == EntityKind::enemy && candidate->kind == EntityKind::player && player_health.current_health > 19) {
                     player_health.current_health -= 20;
                     Entity& player = entity(player_handle_);
@@ -809,9 +817,14 @@ namespace kotte
                     player.world_position.x -= 30;
                     spatial_grid_.update(player_handle_, player_old_bounds, entity_world_bounds(player));
                 }
-                if (player_health.current_health < 19) {currentGameState= GAMESTATE::GameOVER; }
+                if (player_health.current_health < 19) { currentGameState = GAMESTATE::GameOVER; }
+
+                if (proposed_entity.kind == EntityKind::player && candidate->kind == EntityKind::power_up)
+                {
+                    (void)entities_.destroy(candidate_handle);
+                    powerup_active = true;
+                }
             }
-            
         }
 
 
@@ -821,7 +834,8 @@ namespace kotte
     bool Application::is_solid(EntityKind kind) noexcept{
         switch(kind){
         case EntityKind::player:
-
+    
+        case EntityKind::power_up:
         case EntityKind::crate:
         case EntityKind::enemy:
             return true;
