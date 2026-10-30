@@ -132,6 +132,7 @@ namespace kotte
         [[nodiscard]] static Vector2 cardinal_vector(CardinalDirection direction) noexcept;
         [[nodiscard]] CardinalDirection different_enemy_direction(CardinalDirection current_direction);
         [[nodiscard]] bool owner_has_active_bomb(EntityHandle owner) const noexcept;
+        int owner_bomb_count(EntityHandle owner) const noexcept;
         [[nodiscard]] static Vector2 tile_centre(Vector2 world_position) noexcept;
         [[nodiscard]] static Vector2 tile_centre(int column, int row) noexcept;
         [[nodiscard]] static Color entity_color(EntityKind kind) noexcept;
@@ -141,6 +142,8 @@ namespace kotte
         health player_health;
         GAMESTATE currentGameState = GAMESTATE::StartMenu;
         float Time = 180.0f;
+        int score = 0, combo_multiplier = 1;
+        float combo_timer = 0.0f;
         bool powerup_active = false;
 
         static constexpr int tile_size_ = 40;
@@ -150,7 +153,7 @@ namespace kotte
         static constexpr float enemy_speed_ = 80.0f;
         static constexpr float bomb_fuse_seconds_ = 2.0f;
         static constexpr std::uint8_t bomb_blast_range_ = 3;
-        static constexpr std::uint8_t bomb_blast_range_powerup = 6;
+        std::uint8_t bomb_blast_range_powerup = 3;
 
         static constexpr float blast_effect_seconds_ = 0.35f;
         static constexpr Color background_color_{0x11, 0x22, 0x33, 0xff};
@@ -165,7 +168,7 @@ namespace kotte
         static constexpr Color crate_color_{0xb0, 0x72, 0x3c, 0xff};
         static constexpr Color enemy_color_{0xd9, 0x4f, 0x70, 0xff};
         static constexpr Color wall_color_{0x78, 0x5f, 0x47, 0xff};
-        static constexpr Color power_up_color{ 0x20, 0x8f, 0x2d, 0x3e };
+        static constexpr Color power_up_color{ 0x20, 0x8f, 0x2d, 0xff };
 
 
 

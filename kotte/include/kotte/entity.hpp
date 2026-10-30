@@ -24,12 +24,17 @@ namespace kotte
         down,
         left
     };
-
+    enum class BombCollisionState {
+        Passable,
+        Solid
+    };
+    
     struct BombState final {
         EntityHandle owner;
         float fuse_remaining = 0.0f;
         std::uint8_t blast_range = 0;
         bool detonation_requested = false;
+        BombCollisionState collision_state = BombCollisionState::Passable;
 
     };
 

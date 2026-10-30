@@ -55,7 +55,7 @@ namespace kotte
             EndDrawing();
             if (IsKeyDown(KEY_ENTER))
                 currentGameState = GAMESTATE::Game;
-           
+
             break;
         case GAMESTATE::Game:
             begin_frame();
@@ -86,19 +86,22 @@ namespace kotte
             destroy_entity_requests_.clear();
 
 
-
             BeginDrawing();
-            DrawText("press Space to start", (window_.width() / 2) - 200, (window_.height() / 2) - 100, 60, RED);
-            DrawText("ur score[]"/*score*/, (window_.width() / 2) - 500, (window_.height() / 2) - 300, 60, RED);
+            std::string result_msg = (score >= 100) ? "YOU WON!" : "GAME OVER";
+            Color result_color = (score >= 100) ? GREEN : RED;
 
-
-
+            DrawText(result_msg.c_str(), (window_.width() / 2) - 150, (window_.height() / 2) - 200, 60, result_color);
+            DrawText(std::format("Score: {}", score).c_str(), (window_.width() / 2) - 150, (window_.height() / 2) - 100, 60, YELLOW);
+            DrawText("press Space to restart", (window_.width() / 2) - 300, (window_.height() / 2) + 20, 50, WHITE);
             EndDrawing();
-
             if (IsKeyDown(KEY_SPACE))
             {
                 player_health.current_health = player_health.max_health;
-
+                score = 0;
+                combo_multiplier = 1;
+                combo_timer = 0.0f;
+                powerup_active = false;
+                bomb_blast_range_powerup = 3;
                 random_ = Random{ seed_ };
                 map_ = make_room(200, 120, random_);
                 Time = 180.0f;
@@ -113,12 +116,12 @@ namespace kotte
     }
 
 
-      
- 
-    
 
 
-    void Application::begin_frame() noexcept{
+
+
+
+    void Application::begin_frame() noexcept {
         // Every request must be consumed by the previous frame's mutation phase.
         assert(place_bomb_requests_.empty());
         assert(bomb_detonated_facts_.empty());
@@ -127,54 +130,65 @@ namespace kotte
         collision_diagnostics_ = {};
     }
 
-    void Application::collect_frame_actions() noexcept{
-        if(IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_Q)){
+    void Application::collect_frame_actions() noexcept {
+        if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_Q)) {
             request_exit();
         }
         frame_actions_.place_bomb = IsKeyPressed(KEY_SPACE);
 
         Vector2& movement_direction = frame_actions_.player_movement_direction;
-        if(IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)){
+        if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) {
             movement_direction.x -= 1.0f;
         }
-        if(IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)){
+        if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) {
             movement_direction.x += 1.0f;
         }
-        if(IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)){
+        if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) {
             movement_direction.y -= 1.0f;
         }
-        if(IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)){
+        if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) {
             movement_direction.y += 1.0f;
         }
 
+
         // Normalize intent before simulation so bindings cannot change movement speed.
-        if(movement_direction.x != 0.0f || movement_direction.y != 0.0f){
+        if (movement_direction.x != 0.0f || movement_direction.y != 0.0f) {
             movement_direction = Vector2Normalize(movement_direction);
         }
     }
 
-    void Application::update_gameplay(float delta_time){
+    void Application::update_gameplay(float delta_time) {
         // The player and every enemy are movers; each asks its own collision question.
         update_player(delta_time);
         update_enemies(delta_time);
         queue_bomb_placement();
-       
+
     }
 
-    void Application::update_timed_gameplay(float delta_time){
+    void Application::update_timed_gameplay(float delta_time) {
         Time -= delta_time;
- 
+        if ((combo_timer -= delta_time) <= 0.0f) combo_multiplier = 1;
         // This list is independent of camera queries, so off-screen fuses advance.
-        for(const EntityHandle bomb_handle : active_bomb_handles_){
+        for (const EntityHandle bomb_handle : active_bomb_handles_) {
             Entity* bomb = entities_.try_get(bomb_handle);
-            if(bomb == nullptr || !bomb->bomb_state.has_value()
-                || bomb->bomb_state->detonation_requested){
+            if (bomb == nullptr || !bomb->bomb_state.has_value()
+                || bomb->bomb_state->detonation_requested) {
                 continue;
+
+            }
+            if (bomb->bomb_state->collision_state == BombCollisionState::Passable) {
+
+                if (!CheckCollisionRecs(entity_collision_bounds(player()), entity_collision_bounds(*bomb))) {
+                    bomb->bomb_state->collision_state = BombCollisionState::Solid;
+                }
+
             }
 
             BombState& state = *bomb->bomb_state;
             state.fuse_remaining -= delta_time;
-            if(state.fuse_remaining > 0.0f){
+            if (IsKeyPressed(KEY_G) && state.owner == player_handle_)
+                state.fuse_remaining = 0;
+            if (state.fuse_remaining > 0.0f) {
                 continue;
             }
 
@@ -188,12 +202,15 @@ namespace kotte
                 state.owner,
                 bomb->world_position,
                 state.blast_range
-            });
+                });
+
         }
     }
 
-    void Application::resolve_gameplay_facts(){
-        for(const BombDetonated& fact : bomb_detonated_facts_){
+
+
+    void Application::resolve_gameplay_facts() {
+        for (const BombDetonated& fact : bomb_detonated_facts_) {
             BlastEffect effect;
             effect.remaining_seconds = blast_effect_seconds_;
             effect.tile_centres.reserve(static_cast<std::size_t>(fact.blast_range) * 4 + 1);
@@ -201,11 +218,11 @@ namespace kotte
             const float tile_extent = static_cast<float>(tile_size_);
             const int origin_column = static_cast<int>(std::floor(fact.world_position.x / tile_extent));
             const int origin_row = static_cast<int>(std::floor(fact.world_position.y / tile_extent));
-            (void) resolve_blast_tile(effect, origin_column, origin_row);
+            (void)resolve_blast_tile(effect, origin_column, origin_row);
 
             // The detonating bomb must disappear even if its presentation or
             // collision bounds change independently of blast-tile detection.
-            destroy_entity_requests_.push_back({fact.bomb});
+            destroy_entity_requests_.push_back({ fact.bomb });
 
             append_blast_ray(effect, origin_column, origin_row, 0, -1, fact.blast_range);
             append_blast_ray(effect, origin_column, origin_row, 1, 0, fact.blast_range);
@@ -218,24 +235,24 @@ namespace kotte
         bomb_detonated_facts_.clear();
     }
 
-    void Application::apply_structural_mutations(){
+    void Application::apply_structural_mutations() {
         // Entity storage and every derived index change only at this boundary.
         apply_entity_destructions();
         apply_bomb_placements();
     }
 
-    void Application::update_presentation(float delta_time){
-        for(BlastEffect& effect : blast_effects_){
+    void Application::update_presentation(float delta_time) {
+        for (BlastEffect& effect : blast_effects_) {
             effect.remaining_seconds -= delta_time;
         }
-        std::erase_if(blast_effects_, [](const BlastEffect& effect){
+        std::erase_if(blast_effects_, [](const BlastEffect& effect) {
             return effect.remaining_seconds <= 0.0f;
-        });
+            });
 
         update_camera(delta_time);
     }
 
-    void Application::update_player(float delta_time){
+    void Application::update_player(float delta_time) {
         const Vector2 direction = frame_actions_.player_movement_direction;
 
         Entity& player_entity = player();
@@ -243,28 +260,28 @@ namespace kotte
         const Vector2 displacement = direction * (player_speed_ * delta_time);
 
         // Separate proposals let a clear axis slide along a blocked one.
-        if(displacement.x != 0.0f){
-            try_move_player({displacement.x, 0.0f});
+        if (displacement.x != 0.0f) {
+            try_move_player({ displacement.x, 0.0f });
         }
-        if(displacement.y != 0.0f){
-            try_move_player({0.0f, displacement.y});
+        if (displacement.y != 0.0f) {
+            try_move_player({ 0.0f, displacement.y });
         }
 
         const Rectangle player_bounds = entity_world_bounds(player_entity);
-        const Vector2 bounds_offset = player_entity.world_position - Vector2{player_bounds.x, player_bounds.y};
+        const Vector2 bounds_offset = player_entity.world_position - Vector2{ player_bounds.x, player_bounds.y };
         const float floor_left = static_cast<float>(tile_size_);
         const float floor_top = static_cast<float>(tile_size_);
         const float floor_right = static_cast<float>((map_.width() - 1) * tile_size_);
         const float floor_bottom = static_cast<float>((map_.height() - 1) * tile_size_);
-        const Vector2 minimum_position{floor_left + bounds_offset.x, floor_top + bounds_offset.y};
-        const Vector2 maximum_position{floor_right - bounds_offset.x, floor_bottom};
+        const Vector2 minimum_position{ floor_left + bounds_offset.x, floor_top + bounds_offset.y };
+        const Vector2 maximum_position{ floor_right - bounds_offset.x, floor_bottom };
         player_entity.world_position = Vector2Clamp(player_entity.world_position, minimum_position, maximum_position);
 
         const Rectangle new_world_bounds = entity_world_bounds(player_entity);
         spatial_grid_.update(player_handle_, old_world_bounds, new_world_bounds);
     }
 
-    void Application::try_move_player(Vector2 axis_displacement){
+    void Application::try_move_player(Vector2 axis_displacement) {
         // Propose one horizontal or vertical player movement.
         ++collision_diagnostics_.movement_attempts;
 
@@ -272,7 +289,7 @@ namespace kotte
         const Vector2 proposed_position = player_entity.world_position + axis_displacement;
 
         // Detect possible contacts using the mover's proposed collision bounds.
-        if(entity_movement_is_blocked(player_handle_, proposed_position)){
+        if (entity_movement_is_blocked(player_handle_, proposed_position)) {
             // Respond by rejecting only this blocked player axis.
             ++collision_diagnostics_.blocked_moves;
             return;
@@ -282,10 +299,10 @@ namespace kotte
         player_entity.world_position = proposed_position;
     }
 
-    void Application::update_enemies(float delta_time){
+    void Application::update_enemies(float delta_time) {
         // The update list contains every enemy, not only those returned by the
         // camera query. Off-screen enemies therefore keep simulating normally.
-        for(const EntityHandle enemy_handle : enemy_handles_){
+        for (const EntityHandle enemy_handle : enemy_handles_) {
             // Each enemy is one mover with one cardinal movement attempt.
             ++collision_diagnostics_.enemy_updates;
             ++collision_diagnostics_.movement_attempts;
@@ -298,12 +315,13 @@ namespace kotte
             const Vector2 proposed_position = enemy.world_position + displacement;
 
             // Detect a possible contact using this enemy's proposed bounds.
-            if(entity_movement_is_blocked(enemy_handle, proposed_position)){
+            if (entity_movement_is_blocked(enemy_handle, proposed_position)) {
                 // Respond by turning without moving; retry the new heading next update.
                 ++collision_diagnostics_.blocked_moves;
                 ++collision_diagnostics_.enemy_turns;
                 enemy.movement_heading = different_enemy_direction(enemy.movement_heading);
                 continue;
+
             }
 
             enemy.world_position = proposed_position;
@@ -314,8 +332,8 @@ namespace kotte
         }
     }
 
-    void Application::queue_bomb_placement(){
-        if(!frame_actions_.place_bomb){
+    void Application::queue_bomb_placement() {
+        if (!frame_actions_.place_bomb) {
             return;
         }
 
@@ -324,33 +342,52 @@ namespace kotte
         place_bomb_requests_.push_back({
             player_handle_,
             tile_centre(player().world_position)
-        });
+            });
     }
 
-    void Application::apply_bomb_placements(){
-        for(const PlaceBombRequest& request : place_bomb_requests_){
+    void Application::apply_bomb_placements() {
+        for (const PlaceBombRequest& request : place_bomb_requests_) {
             const Entity* owner = entities_.try_get(request.owner);
-            if(owner == nullptr || owner->kind != EntityKind::player
-                || owner_has_active_bomb(request.owner)){
+            if (owner == nullptr || owner->kind != EntityKind::player
+                || owner_bomb_count(request.owner) >= 3) {
+                continue;
+            }
+            bool tile_is_taken = false;
+
+            for (const EntityHandle bomb_handle : active_bomb_handles_) {
+                const Entity* existing_bomb = entities_.try_get(bomb_handle);
+
+                if (existing_bomb != nullptr
+                    && Vector2Equals(existing_bomb->world_position, request.world_position)) {
+                    tile_is_taken = true;
+                }
+
+            }
+            if (tile_is_taken) {
                 continue;
             }
 
-            const Entity bomb{
+            const Entity  bomb{
                 .kind = EntityKind::bomb,
+
                 .world_position = request.world_position,
                 .bomb_state = BombState{
                     .owner = request.owner,
                     .fuse_remaining = bomb_fuse_seconds_,
-                    .blast_range = powerup_active ? bomb_blast_range_powerup : bomb_blast_range_
-                    
+                    .blast_range = powerup_active ? bomb_blast_range_powerup : bomb_blast_range_,
+
+
+
+
                 }
 
+
             };
-            if (powerup_active)
-            {
-                powerup_active = false;
-            }
+        
+            
+
             const EntityHandle bomb_handle = entities_.create(bomb);
+
 
             // The store owns the bomb; these handles are synchronized, non-owning
             // views used by spatial queries and timed gameplay.
@@ -361,7 +398,7 @@ namespace kotte
         place_bomb_requests_.clear();
     }
 
-    void Application::apply_entity_destructions(){
+    void Application::apply_entity_destructions() {
         // A moving entity may overlap several blast tiles, and several bombs may
         // reach it in one frame. Canonicalizing requests makes that multiplicity
         // explicit instead of depending on a forgiving destruction order.
@@ -370,22 +407,29 @@ namespace kotte
             destroy_entity_requests_, {}, &DestroyEntityRequest::entity);
         destroy_entity_requests_.erase(duplicate_tail.begin(), duplicate_tail.end());
 
-        for(const DestroyEntityRequest& request : destroy_entity_requests_){
-             Entity* doomed = entities_.try_get(request.entity);
-            if(doomed == nullptr){
+        for (const DestroyEntityRequest& request : destroy_entity_requests_) {
+            Entity* doomed = entities_.try_get(request.entity);
+            if (doomed == nullptr) {
                 continue;
             }
 
             // Spatial membership is derived from the live entity, so remove it
             // while the handle can still resolve to the bounds used at insertion.
-            if (doomed->kind == EntityKind::bomb || doomed->kind == EntityKind::crate|| doomed->kind == EntityKind::power_up)
+            if (doomed->kind == EntityKind::bomb || doomed->kind == EntityKind::crate || doomed->kind == EntityKind::power_up)
             {
+                if (doomed->kind == EntityKind::power_up) {
+                    powerup_active = true;
+                    bomb_blast_range_powerup = static_cast<std::uint8_t>(std::min(bomb_blast_range_powerup + 1, 8));
+                }
                 spatial_grid_.remove(request.entity, entity_world_bounds(*doomed));
                 (void)entities_.destroy(request.entity);
                 continue;
+            
+                
+               
             }
             const Rectangle old_world_bounds = entity_world_bounds(*doomed);
-           
+
 
             doomed->kind = EntityKind::power_up;
             const Rectangle new_world_bounds_power_up = entity_world_bounds(*doomed);
@@ -396,12 +440,12 @@ namespace kotte
         // These update lists are non-owning views. A single cleanup pass keeps
         // their iteration dense without teaching each destruction source about
         // every list that happens to reference an entity.
-        std::erase_if(enemy_handles_, [this](EntityHandle handle){ 
+        std::erase_if(enemy_handles_, [this](EntityHandle handle) {
             return entity(handle).kind == EntityKind::power_up;
-        });
-        std::erase_if(active_bomb_handles_, [this](EntityHandle handle){
+            });
+        std::erase_if(active_bomb_handles_, [this](EntityHandle handle) {
             return !entities_.contains(handle);
-        });
+            });
 
         destroy_entity_requests_.clear();
     }
@@ -409,7 +453,7 @@ namespace kotte
     bool Application::resolve_blast_tile(
         BlastEffect& effect,
         int column,
-        int row){
+        int row) {
         const Vector2 centre = tile_centre(column, row);
         effect.tile_centres.push_back(centre);
 
@@ -428,25 +472,46 @@ namespace kotte
             if (candidate == nullptr
                 || !CheckCollisionRecs(tile_bounds, entity_collision_bounds(*candidate))) {
                 continue;
+
             }
 
             switch (candidate->kind) {
             case EntityKind::bomb:
                 break;
-            case EntityKind::enemy:
-                destroy_entity_requests_.push_back({ handle });
+
+            case EntityKind::enemy: {
+                bool already_hit = false;
+                for (const DestroyEntityRequest& request : destroy_entity_requests_) {
+                    if (request.entity == handle) {
+                        already_hit = true;
+                    }
+                }
+
+                if (!already_hit) {
+                    destroy_entity_requests_.push_back({ handle });
+                    score += 10 * combo_multiplier++;
+                    combo_timer = 5.0f;
+                    if (score >= 100) currentGameState = GAMESTATE::GameOVER;
+                }
                 break;
+            }
+
+
             case EntityKind::crate:
                 destroy_entity_requests_.push_back({ handle });
                 blocked_by_crate = true;
                 break;
             case EntityKind::player:
-                // Player-hit consequences are outside the Week 6 lifetime seam.
+                player_health.current_health -= 20;
+                if (player_health.current_health < 19) currentGameState = GAMESTATE::GameOVER;
                 break;
-                case EntityKind::power_up:
-                    break;
+
+
+             
+            case EntityKind::power_up:
+                break;
             }
-        
+
         }
 
         return blocked_by_crate;
@@ -458,35 +523,35 @@ namespace kotte
         int origin_row,
         int column_step,
         int row_step,
-        std::uint8_t range){
-        for(int distance = 1; distance <= static_cast<int>(range); ++distance){
+        std::uint8_t range) {
+        for (int distance = 1; distance <= static_cast<int>(range); ++distance) {
             const int column = origin_column + column_step * distance;
             const int row = origin_row + row_step * distance;
-            if(!map_.contains(column, row) || map_.at(column, row).type == TileType::wall){
+            if (!map_.contains(column, row) || map_.at(column, row).type == TileType::wall) {
                 break;
             }
 
-            if(resolve_blast_tile(effect, column, row)){
+            if (resolve_blast_tile(effect, column, row)) {
                 break;
             }
         }
     }
 
-    void Application::update_camera(float delta_time) noexcept{
-        (void) delta_time; // name the argument to avoid the static analyzer yelling at us. :) We'll animate the camera later.
+    void Application::update_camera(float delta_time) noexcept {
+        (void)delta_time; // name the argument to avoid the static analyzer yelling at us. :) We'll animate the camera later.
         camera_.set_viewport_size(window_.size());
         camera_.set_centre(player().world_position);
     }
 
-    void Application::render(){
-        Frame frame{background_color_};
-        
+    void Application::render() {
+        Frame frame{ background_color_ };
+
         const Rectangle world_view = camera_.world_view();
         const TileRange visible_tiles = map_.tiles_overlapping(world_view, tile_size_);
         std::size_t tiles_rendered = 0;
 
-        for(int y = visible_tiles.first_row; y < visible_tiles.past_last_row; ++y){
-            for(int x = visible_tiles.first_column; x < visible_tiles.past_last_column; ++x){
+        for (int y = visible_tiles.first_row; y < visible_tiles.past_last_row; ++y) {
+            for (int x = visible_tiles.first_column; x < visible_tiles.past_last_column; ++x) {
                 const Tile& tile = map_.at(x, y);
                 const Color color = tile.type == TileType::wall
                     ? wall_color_
@@ -516,19 +581,19 @@ namespace kotte
         // Blast effects are short-lived presentation values, not authoritative
         // entities. Rebuilding commands here keeps their lifetime out of gameplay.
         constexpr float blast_inset = 3.0f;
-        for(const BlastEffect& effect : blast_effects_){
-            for(const Vector2 tile_world_centre : effect.tile_centres){
+        for (const BlastEffect& effect : blast_effects_) {
+            for (const Vector2 tile_world_centre : effect.tile_centres) {
                 Rectangle bounds{
                     tile_world_centre.x - static_cast<float>(tile_size_) / 2.0f + blast_inset,
                     tile_world_centre.y - static_cast<float>(tile_size_) / 2.0f + blast_inset,
                     static_cast<float>(tile_size_) - blast_inset * 2.0f,
                     static_cast<float>(tile_size_) - blast_inset * 2.0f
                 };
-                if(!CheckCollisionRecs(bounds, world_view)){
+                if (!CheckCollisionRecs(bounds, world_view)) {
                     continue;
                 }
 
-                const Vector2 screen_position = camera_.world_to_screen({bounds.x, bounds.y});
+                const Vector2 screen_position = camera_.world_to_screen({ bounds.x, bounds.y });
                 bounds.x = screen_position.x;
                 bounds.y = screen_position.y;
                 renderer_.submit({
@@ -537,9 +602,9 @@ namespace kotte
                     RenderLayer::effect,
                     tile_world_centre.y,
                     0.3f
-                   
-                });
-               
+
+                    });
+
 
 
             }
@@ -547,20 +612,20 @@ namespace kotte
 
         // The spatial query replaces Week 3's complete entity scan. Its result is
         // only a candidate list, so every candidate still needs an exact test.
-        for(const EntityHandle entity_handle : spatial_query.entity_handles){
+        for (const EntityHandle entity_handle : spatial_query.entity_handles) {
             const Entity* visible_candidate = entities_.try_get(entity_handle);
-            if(visible_candidate == nullptr){
+            if (visible_candidate == nullptr) {
                 continue;
             }
 
             Rectangle bounds = entity_world_bounds(*visible_candidate);
             ++exact_visibility_tests;
-            if(!CheckCollisionRecs(bounds, world_view)){
+            if (!CheckCollisionRecs(bounds, world_view)) {
                 continue;
             }
 
             ++visible_entities;
-            const Vector2 screen_position = camera_.world_to_screen({bounds.x, bounds.y});
+            const Vector2 screen_position = camera_.world_to_screen({ bounds.x, bounds.y });
             bounds.x = screen_position.x;
             bounds.y = screen_position.y;
             const RenderLayer layer = visible_candidate->kind == EntityKind::bomb
@@ -572,7 +637,7 @@ namespace kotte
                 layer,
                 visible_candidate->world_position.y,
                 entity_roundness(visible_candidate->kind)
-            });
+                });
         }
         renderer_.sort();
         renderer_.execute();
@@ -627,43 +692,50 @@ namespace kotte
 
         diagnostics = std::format("seed: {}", seed_);
         DrawText(diagnostics.c_str(), 10, window_.height() - 78, 20, RAYWHITE);
-        
-        diagnostics = std::format("Health: {}", 
+
+        diagnostics = std::format("Health: {}",
             player_health.current_health);
-        DrawText(diagnostics.c_str(), window_.width()-200, window_.height() - 56, 20, RAYWHITE);
-       
+        DrawText(diagnostics.c_str(), window_.width() - 200, window_.height() - 56, 20, RAYWHITE);
+        diagnostics = std::format("Range: {}", powerup_active ? bomb_blast_range_powerup : bomb_blast_range_);
+        DrawText(diagnostics.c_str(), window_.width() - 200, window_.height() - 104, 20, RAYWHITE);
+        diagnostics = std::format("Bombs: {}/3", owner_bomb_count(player_handle_));
+        DrawText(diagnostics.c_str(), window_.width() - 200, window_.height() - 152, 20, RAYWHITE);
+
+        diagnostics = std::format("Score: {}/100 (Combo x{})", score, combo_multiplier);
+        DrawText(diagnostics.c_str(), window_.width() - 350, window_.height() - 128, 20, YELLOW);
+
         diagnostics = std::format("time: {}s",
-           static_cast<int> (Time));
-        DrawText(diagnostics.c_str(), window_.width() - 300, window_.height() -80, 20, RAYWHITE);
-       ;
+            static_cast<int> (Time));
+        DrawText(diagnostics.c_str(), window_.width() - 300, window_.height() - 80, 20, RAYWHITE);
+        ;
 
 
         diagnostics = std::format(
             "world: {} x {} tiles | {} total", map_.width(), map_.height(), map_.tile_count());
         DrawText(diagnostics.c_str(), 10, window_.height() - 54, 20, RAYWHITE);
 
-        DrawText("move: WASD/arrows | bomb: Space | quit: Q/Escape", 10, window_.height() - 30, 20, LIGHTGRAY);
+        DrawText("move: WASD/arrows | bomb: Space | detonate: G | quit: Q/Escape", 10, window_.height() - 30, 20, LIGHTGRAY);
     }
 
-    void Application::populate_entities(){
+    void Application::populate_entities() {
         // Match the generation density so initial creation does not repeatedly
         // relocate slot storage. Handles remain valid even if this estimate grows.
         entities_.reserve(map_.tile_count() / 4);
 
-        const Entity player_entity{EntityKind::player, {tile_size_ * 2.5f, tile_size_ * 2.5f}};
+        const Entity player_entity{ EntityKind::player, {tile_size_ * 2.5f, tile_size_ * 2.5f} };
         player_handle_ = entities_.create(player_entity);
         spatial_grid_.insert(player_handle_, entity_world_bounds(player_entity));
 
-        for(int y = 1; y < map_.height() - 1; ++y){
-            for(int x = 1; x < map_.width() - 1; ++x){
-                if((x == 2 && y == 2) || map_.at(x, y).type != TileType::floor || !random_.coin_flip(0.25f)){
+        for (int y = 1; y < map_.height() - 1; ++y) {
+            for (int x = 1; x < map_.width() - 1; ++x) {
+                if ((x == 2 && y == 2) || map_.at(x, y).type != TileType::floor || !random_.coin_flip(0.25f)) {
                     continue;
                 }
 
                 const std::uint8_t kind_roll = random_.next<20, std::uint8_t>();
                 // Week 3's inert bomb markers are no longer needed: every bomb
                 // now enters the world through the explicit lifetime path.
-                if(kind_roll >= 15 && kind_roll < 19){
+                if (kind_roll >= 15 && kind_roll < 19) {
                     continue;
                 }
                 const EntityKind kind = kind_roll < 15 ? EntityKind::crate : EntityKind::enemy;
@@ -671,82 +743,82 @@ namespace kotte
                     static_cast<float>(x * tile_size_ + tile_size_ / 2),
                     static_cast<float>(y * tile_size_ + tile_size_ / 2)
                 };
-                const Entity new_entity{kind, world_position};
+                const Entity new_entity{ kind, world_position };
                 const EntityHandle handle = entities_.create(new_entity);
                 spatial_grid_.insert(handle, entity_world_bounds(new_entity));
 
-                if(kind == EntityKind::enemy){
+                if (kind == EntityKind::enemy) {
                     enemy_handles_.push_back(handle);
                 }
             }
         }
     }
 
-    void Application::initialize_enemies(){
+    void Application::initialize_enemies() {
         // Finish every world-generation roll before drawing runtime headings.
         // This preserves the complete Week 4 layout for the reference seed.
-        for(const EntityHandle enemy_handle : enemy_handles_){
+        for (const EntityHandle enemy_handle : enemy_handles_) {
             Entity& enemy = entity(enemy_handle);
             enemy.movement_heading = static_cast<CardinalDirection>(
                 random_.next<4, std::uint8_t>());
         }
     }
 
-    Entity& Application::entity(EntityHandle handle) noexcept{
+    Entity& Application::entity(EntityHandle handle) noexcept {
         Entity* resolved = entities_.try_get(handle);
         assert(resolved != nullptr);
         return *resolved;
     }
 
-    const Entity& Application::entity(EntityHandle handle) const noexcept{
+    const Entity& Application::entity(EntityHandle handle) const noexcept {
         const Entity* resolved = entities_.try_get(handle);
         assert(resolved != nullptr);
         return *resolved;
     }
 
-    Entity& Application::player() noexcept{
+    Entity& Application::player() noexcept {
         return entity(player_handle_);
     }
 
-    const Entity& Application::player() const noexcept{
+    const Entity& Application::player() const noexcept {
         return entity(player_handle_);
     }
 
-    Rectangle Application::entity_world_bounds(const Entity& entity) const noexcept{
+    Rectangle Application::entity_world_bounds(const Entity& entity) const noexcept {
         Vector2 size{};
-        switch(entity.kind){
+        switch (entity.kind) {
         case EntityKind::player: size = { 28.0f, 30.0f }; break;
-        case EntityKind::bomb: size = {24.0f, 24.0f}; break;
-        case EntityKind::crate: size = {36.0f, 48.0f}; break;
-        case EntityKind::enemy: size = {28.0f, 30.0f}; break;
+        case EntityKind::bomb: size = { 24.0f, 24.0f }; break;
+        case EntityKind::crate: size = { 36.0f, 48.0f }; break;
+        case EntityKind::enemy: size = { 28.0f, 30.0f }; break;
         case EntityKind::power_up: size = { 21.0f, 21.0f }; break;
 
         }
 
-        const Vector2 top_left = entity.world_position - Vector2{size.x / 2.0f, size.y};
-        return {top_left.x, top_left.y, size.x, size.y};
+        const Vector2 top_left = entity.world_position - Vector2{ size.x / 2.0f, size.y };
+        return { top_left.x, top_left.y, size.x, size.y };
     }
 
-    Rectangle Application::entity_collision_bounds(const Entity& entity) const noexcept{
+    Rectangle Application::entity_collision_bounds(const Entity& entity) const noexcept {
         // Collision uses a smaller footprint around the part touching the
         // floor. The complete visual rectangle remains in the spatial grid so
         // broad-phase queries conservatively find every possible contact.
         Vector2 size{};
-        switch(entity.kind){
-        case EntityKind::player: size = {20.0f, 16.0f}; break;
-        case EntityKind::bomb: size = {19.0f, 14.0f}; break;
-        case EntityKind::crate: size = {32.0f, 32.0f}; break;
-        case EntityKind::enemy: size = {24.0f, 14.0f}; break;
+        switch (entity.kind) {
+        case EntityKind::player: size = { 20.0f, 16.0f }; break;
+        case EntityKind::bomb: size = { 19.0f, 14.0f }; break;
+        case EntityKind::crate: size = { 32.0f, 32.0f }; break;
+        case EntityKind::enemy: size = { 24.0f, 14.0f }; break;
         case EntityKind::power_up: size = { 18.0f, 12.0f }; break;
         }
 
-        const Vector2 top_left = entity.world_position - Vector2{size.x / 2.0f, size.y};
-        return {top_left.x, top_left.y, size.x, size.y};
+        const Vector2 top_left = entity.world_position - Vector2{ size.x / 2.0f, size.y };
+        return { top_left.x, top_left.y, size.x, size.y };
     }
 
     bool Application::entity_movement_is_blocked(
         EntityHandle moving_entity_handle,
-        Vector2 proposed_position){
+        Vector2 proposed_position) {
         Entity proposed_entity = entity(moving_entity_handle);
         proposed_entity.world_position = proposed_position;
 
@@ -761,7 +833,7 @@ namespace kotte
             || proposed_world_bounds.y < floor_top
             || proposed_world_bounds.x + proposed_world_bounds.width > floor_right
             || proposed_world_bounds.y + proposed_world_bounds.height > floor_bottom;
-        if(leaves_room){
+        if (leaves_room) {
             ++collision_diagnostics_.boundary_blocks;
             return true;
         }
@@ -775,7 +847,7 @@ namespace kotte
         collision_diagnostics_.candidate_references += spatial_query.candidate_references;
         // These counters aggregate work across movers, not globally unique entities.
         collision_diagnostics_.unique_candidates += spatial_query.entity_handles.size();
-      
+
         bool blocked = false;
 
         // Filter: remove the mover and non-solid kinds before exact testing.
@@ -787,9 +859,28 @@ namespace kotte
             const Entity* candidate = entities_.try_get(candidate_handle);
             if (candidate == nullptr || !is_solid(candidate->kind)) {
                 continue;
-
+               
             }
+            if (candidate->kind == EntityKind::bomb && candidate->bomb_state.has_value()) {
+                if (candidate->bomb_state->collision_state == BombCollisionState::Passable
+                    && moving_entity_handle == candidate->bomb_state->owner) {
+                    continue;
+                }
+            
+            }
+            
 
+            if (candidate->kind == EntityKind::power_up) {
+                if (proposed_entity.kind == EntityKind::player
+                    && CheckCollisionRecs(proposed_collision_bounds, entity_collision_bounds(*candidate))) {
+                    destroy_entity_requests_.push_back({ candidate_handle });
+                    
+                    
+                    
+
+                }
+                continue;
+            }
             // Narrow phase: exact-test the remaining solid candidate.
             ++collision_diagnostics_.exact_tests;
             if (CheckCollisionRecs(proposed_collision_bounds, entity_collision_bounds(*candidate))) {
@@ -817,47 +908,43 @@ namespace kotte
                     player.world_position.x -= 30;
                     spatial_grid_.update(player_handle_, player_old_bounds, entity_world_bounds(player));
                 }
-                if (player_health.current_health < 19) { currentGameState = GAMESTATE::GameOVER; }
-
-                if (proposed_entity.kind == EntityKind::player && candidate->kind == EntityKind::power_up)
-                {
-                    (void)entities_.destroy(candidate_handle);
-                    powerup_active = true;
-                }
+              
+                
             }
         }
 
-
+        if (player_health.current_health < 19) { currentGameState = GAMESTATE::GameOVER; }
         return blocked;
     }
 
-    bool Application::is_solid(EntityKind kind) noexcept{
-        switch(kind){
+
+    bool Application::is_solid(EntityKind kind) noexcept {
+        switch (kind) {
         case EntityKind::player:
-    
+
         case EntityKind::power_up:
         case EntityKind::crate:
         case EntityKind::enemy:
-            return true;
         case EntityKind::bomb:
-            return false;
+            return true;
+
         }
 
         return false;
     }
 
-    Vector2 Application::cardinal_vector(CardinalDirection direction) noexcept{
-        switch(direction){
-        case CardinalDirection::up: return {0.0f, -1.0f};
-        case CardinalDirection::right: return {1.0f, 0.0f};
-        case CardinalDirection::down: return {0.0f, 1.0f};
-        case CardinalDirection::left: return {-1.0f, 0.0f};
+    Vector2 Application::cardinal_vector(CardinalDirection direction) noexcept {
+        switch (direction) {
+        case CardinalDirection::up: return { 0.0f, -1.0f };
+        case CardinalDirection::right: return { 1.0f, 0.0f };
+        case CardinalDirection::down: return { 0.0f, 1.0f };
+        case CardinalDirection::left: return { -1.0f, 0.0f };
         }
 
         return {};
     }
 
-    CardinalDirection Application::different_enemy_direction(CardinalDirection current_direction){
+    CardinalDirection Application::different_enemy_direction(CardinalDirection current_direction) {
         constexpr std::uint8_t direction_count = 4;
         const std::uint8_t current_value = static_cast<std::uint8_t>(current_direction);
 
@@ -870,14 +957,16 @@ namespace kotte
         return static_cast<CardinalDirection>(new_value);
     }
 
-    bool Application::owner_has_active_bomb(EntityHandle owner) const noexcept{
-        return std::ranges::any_of(active_bomb_handles_, [this, owner](EntityHandle bomb_handle){
+    int Application::owner_bomb_count(EntityHandle owner) const noexcept {
+        return static_cast<int>(std::ranges::count_if(active_bomb_handles_, [this, owner](EntityHandle bomb_handle) {
             const Entity* bomb = entities_.try_get(bomb_handle);
             return bomb != nullptr
                 && bomb->bomb_state.has_value()
                 && bomb->bomb_state->owner == owner;
-        });
+
+            }));
     }
+
 
     Vector2 Application::tile_centre(Vector2 world_position) noexcept{
         const float tile_extent = static_cast<float>(tile_size_);
@@ -900,7 +989,9 @@ namespace kotte
         case EntityKind::bomb: return bomb_color_;
         case EntityKind::crate: return crate_color_;
         case EntityKind::enemy: return enemy_color_;
+        case EntityKind::power_up: return power_up_color;
         }
+
         return MAGENTA;
     }
 
