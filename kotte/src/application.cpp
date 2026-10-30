@@ -167,6 +167,7 @@ namespace kotte
 
     void Application::update_timed_gameplay(float delta_time) {
         Time -= delta_time;
+        if (Time <= 0.0f) currentGameState = GAMESTATE::GameOVER;
         if ((combo_timer -= delta_time) <= 0.0f) combo_multiplier = 1;
         // This list is independent of camera queries, so off-screen fuses advance.
         for (const EntityHandle bomb_handle : active_bomb_handles_) {
