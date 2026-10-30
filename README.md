@@ -1,6 +1,6 @@
-# Bomberman World — [your game title]
+# Bomberman World — [Boom & Drop]
 
-**Student:** Arad Jamali Moghadam
+ Arad Jamali Moghadam
 
 
 ## How to play
@@ -8,7 +8,7 @@
 - **Controls:** WASD arrows to move, space to place a bomb , G to detonate the bombs
 - Enter to start, Space to restart after gameover, Q / Esc to quit
 
-- **Objective and rules:** rach to 100 points by killing enemies , each enemy gives 10 points. Lose when health <19 , each hit is 20. win has piroty if both happens.Dead enemies drop a +1 range pick up, max is 8. Max 3 Bombs . 
+- **Objective and rules:** rach to 100 points by killing enemies , each enemy gives 10 points. Lose when health <19 , each hit is 20. win has piority if both happens.Dead enemies drop a +1 range pick up, max is 8. Max 3 Bombs . 
 - **Configurations / demo setup:** default
 ## Features and validation
 
