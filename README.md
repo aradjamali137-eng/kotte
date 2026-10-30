@@ -1,7 +1,6 @@
-# Bomberman World — [Boom & Drop]
+# Bomberman World — Boom & Drop
 
- Arad Jamali Moghadam
-
+**Student:** Arad Jamali Moghadam
 
 ## How to play
 
